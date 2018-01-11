@@ -2,7 +2,7 @@
 
 remove_satellite_from_master() {
 
-  echo " [i] remove myself from my master '${ICINGA_MASTER}'"
+  log_info "remove myself from my master '${ICINGA_MASTER}'"
   # remove myself from master
   #
   code=$(curl \
@@ -40,13 +40,13 @@ cat << EOF
 EOF
   }
 
-  sleep $(shuf -i 1-10 -n 1)s
+  sleep $(random)s
 
   . /init/wait_for/icinga_master.sh
 
   # add myself as host
   #
-  echo " [i] add myself to my master '${ICINGA_MASTER}'"
+  log_info "add myself to my master '${ICINGA_MASTER}'"
 
   code=$(curl \
     --user ${ICINGA_CERT_SERVICE_API_USER}:${ICINGA_CERT_SERVICE_API_PASSWORD} \
@@ -57,16 +57,13 @@ EOF
     --data "$(api_satellite_host)" \
     https://${ICINGA_MASTER}:5665/v1/objects/hosts/$(hostname -f) )
 
-#  echo "${code}"
-
-  if [ $? -eq 0 ]
+  if [ $? -gt 0 ]
   then
-    :
-  else
     status=$(echo "${code}" | jq --raw-output '.results[].code' 2> /dev/null)
     message=$(echo "${code}" | jq --raw-output '.results[].status' 2> /dev/null)
 
-    echo " [E] ${message}"
+    log_error "${code}"
+    log_error "${message}"
 
     add_satellite_to_master
   fi
@@ -75,13 +72,13 @@ EOF
 
 restart_master() {
 
-  sleep $(shuf -i 10-25 -n 1)s
+  sleep $(random)s
 
   . /init/wait_for/icinga_master.sh
 
   # restart the master to activate the zone
   #
-  echo " [i] restart the master '${ICINGA_MASTER}' to activate the zone"
+  log_info "restart the master '${ICINGA_MASTER}' to activate the zone"
   code=$(curl \
     --user ${ICINGA_CERT_SERVICE_API_USER}:${ICINGA_CERT_SERVICE_API_PASSWORD} \
     --silent \
@@ -90,28 +87,20 @@ restart_master() {
     --insecure \
     https://${ICINGA_MASTER}:5665/v1/actions/restart-process )
 
-#  echo "${code}"
-
-  if [ $? -eq 0 ]
+  if ( [ $? -gt 0 ] && [ ! -z "${code}" ] )
   then
-    :
-#    status=$(echo "${code}" | jq --raw-output '.results[].code' 2> /dev/null)
-#    message=$(echo "${code}" | jq --raw-output '.results[].status' 2> /dev/null)
-#
-#    echo " [i] ${message}"
-  else
     status=$(echo "${code}" | jq --raw-output '.results[].code' 2> /dev/null)
     message=$(echo "${code}" | jq --raw-output '.results[].status' 2> /dev/null)
 
-    echo " [E] ${message}"
+    log_error "${code}"
+    log_error "${message}"
   fi
-
 }
 
 
 create_endpoint_config() {
 
-  echo " [i] configure my endpoint: '${ICINGA_MASTER}'"
+  log_info "configure my endpoint: '${ICINGA_MASTER}'"
 
     # curl -k  -uroot:icinga -H 'Accept: application/json' \
     # -X PUT --header 'Content-Type: application/json;charset=UTF-8' \
@@ -145,39 +134,83 @@ create_endpoint_config() {
  */
 
 /* the following line specifies that the client connects to the master and not vice versa */
-object Endpoint "${ICINGA_MASTER}" { host = "${ICINGA_MASTER}" ; port = "5665" }
-object Zone "master" { endpoints = [ "${ICINGA_MASTER}" ] }
-/* endpoint for this satellite */
-object Endpoint NodeName { host = NodeName }
-object Zone ZoneName { endpoints = [ NodeName ] }
+object Endpoint "${ICINGA_MASTER}" {
+  host = "${ICINGA_MASTER}"
+  port = "5665"
+}
+object Zone "master" {
+  endpoints = [ "${ICINGA_MASTER}" ]
+}
+
 /* global zones */
-object Zone "global-templates" { global = true }
-object Zone "director-global" { global = true }
+object Zone "global-templates" {
+  global = true
+}
+object Zone "director-global" {
+  global = true
+}
+
+/* endpoint for this satellite */
+/*
+  object Endpoint NodeName { host = NodeName }
+  object Zone ZoneName { endpoints = [ NodeName ] }
+*/
 
 EOF
 
-    # create an second zone.conf
-    # here the endpoint and the own zone configuration are removed.
-    # This is created by the master via the API and stored under ${ICINGA_LIB_DIR}.
-    # restarting the containers would otherwise cause conflicts
-    #
-    cat << EOF > ${ICINGA_LIB_DIR}/backup/zones.conf
-/*
- * created at $(date)
- */
+#    # create an second zone.conf
+#    # here the endpoint and the own zone configuration are removed.
+#    # This is created by the master via the API and stored under ${ICINGA_LIB_DIR}.
+#    # restarting the containers would otherwise cause conflicts
+#    #
+#    cat << EOF > ${ICINGA_LIB_DIR}/backup/zones.conf
+#/*
+# * created at $(date)
+# */
+#
+#/* the following line specifies that the client connects to the master and not vice versa */
+#object Endpoint "${ICINGA_MASTER}" { host = "${ICINGA_MASTER}" ; port = "5665" }
+#object Zone "master" { endpoints = [ "${ICINGA_MASTER}" ] }
+#/* endpoint for this satellite */
+#/*
+#  object Endpoint NodeName { host = NodeName }
+#  object Zone ZoneName { endpoints = [ NodeName ]; parent = "master" }
+#*
+#/* global zones */
+#object Zone "global-templates" { global = true }
+#object Zone "director-global" { global = true }
+#
+#EOF
+  fi
 
-/* the following line specifies that the client connects to the master and not vice versa */
-object Endpoint "${ICINGA_MASTER}" { host = "${ICINGA_MASTER}" ; port = "5665" }
-object Zone "master" { endpoints = [ "${ICINGA_MASTER}" ] }
-/* endpoint for this satellite */
-object Endpoint NodeName { host = NodeName }
-object Zone ZoneName { endpoints = [ NodeName ]; parent = "master" }
-/* global zones */
-object Zone "global-templates" { global = true }
-object Zone "director-global" { global = true }
+  cp /etc/icinga2/zones.conf ${ICINGA_LIB_DIR}/backup/zones.conf
 
+  hostname_f=$(hostname -f)
+  api_endpoint="${ICINGA_LIB_DIR}/api/zones/${hostname_f}/_etc/${hostname_f}.conf"
+
+  if [ -f ${api_endpoint} ]
+  then
+    cat << EOF >> /etc/icinga2/zones.conf
+object Zone ZoneName {
+  endpoints = [ NodeName ]
+  parent = "master"
+}
+EOF
+  else
+    cat << EOF >> /etc/icinga2/zones.conf
+object Endpoint NodeName {
+  host = NodeName
+}
+object Zone ZoneName {
+  endpoints = [ NodeName ]
+  parent = "master"
+}
 EOF
   fi
+
+
+  cat /etc/icinga2/zones.conf
+
 }
 
 
@@ -185,12 +218,14 @@ EOF
 #
 configure_icinga2_satellite() {
 
-#   echo " [i] we are an satellite .."
+#   log_info "we are an satellite .."
   export ICINGA_SATELLITE=true
+
+  # [ -d ${ICINGA_LIB_DIR}/api/zones ] && rm -rf ${ICINGA_LIB_DIR}/api/zones/*
 
   # randomized sleep to avoid timing problems
   #
-  sleep $(shuf -i 1-30 -n 1)s
+  sleep $(random)s
 
   . /init/wait_for/cert_service.sh
   . /init/wait_for/icinga_master.sh
@@ -214,28 +249,31 @@ configure_icinga2_satellite() {
     validate_local_ca
   fi
 
+set -x
   # restore zone backup
   #
   if [ -f ${ICINGA_LIB_DIR}/backup/zones.conf ]
   then
+
     cp ${ICINGA_LIB_DIR}/backup/zones.conf /etc/icinga2/zones.conf
 
-    # check our endpoint
-    #
-    hostname_f=$(hostname -f)
-    api_endpoint="${ICINGA_LIB_DIR}/api/zones/${hostname_f}/_etc/${hostname_f}.conf"
-    local_endpoint="/etc/icinga2/zones.conf"
-
-    if [ -f ${api_endpoint} ]
-    then
-      # remove local Endpoint Configuration
-      #
-      if [ $(grep -c "^object Endpoint" ${local_endpoint}) -gt 0 ]
-      then
-        sed -i 's|^object Endpoint NodeName.*||' ${local_endpoint}
-      fi
-    fi
+#    # check our endpoint
+#    #
+#    hostname_f=$(hostname -f)
+#    api_endpoint="${ICINGA_LIB_DIR}/api/zones/${hostname_f}/_etc/${hostname_f}.conf"
+#    local_endpoint="/etc/icinga2/zones.conf"
+#
+#    if [ -f ${api_endpoint} ]
+#    then
+#      # remove local Endpoint Configuration
+#      #
+#      if [ $(grep -c "^object Endpoint" ${local_endpoint}) -gt 0 ]
+#      then
+#        sed -i 's|^object Endpoint NodeName.*||' ${local_endpoint}
+#      fi
+#    fi
   fi
+set +x
 
   # we have a certificate
   # restore our own zone configuration
@@ -257,7 +295,7 @@ configure_icinga2_satellite() {
 
     # and now we have to ask our master to confirm this certificate
     #
-    echo " [i] ask our cert-service to sign our certifiacte"
+    log_info "ask our cert-service to sign our certifiacte"
 
     . /init/wait_for/cert_service.sh
 
@@ -273,6 +311,10 @@ configure_icinga2_satellite() {
 
     if ( [ $? -eq 0 ] && [ ${code} == 200 ] )
     then
+
+      cat /tmp/sign_${HOSTNAME}.json
+
+
       rm -f /tmp/sign_${HOSTNAME}.json
 
       sleep 5s
@@ -282,7 +324,8 @@ configure_icinga2_satellite() {
       status=$(echo "${code}" | jq --raw-output .status 2> /dev/null)
       message=$(echo "${code}" | jq --raw-output .message 2> /dev/null)
 
-      echo " [E] ${message}"
+      log_error "${code}"
+      log_error "${message}"
 
       # TODO
       # wat nu?
@@ -290,7 +333,7 @@ configure_icinga2_satellite() {
 
     # create thecertificate pem for later use
     #
-    create_certificate_pem
+    # create_certificate_pem
 
     # create our zone config file
     #
@@ -320,10 +363,12 @@ configure_icinga2_satellite() {
 
     # i think, the restart must be come later, when more than one satellite are connected
     #
-    sleep 2
-
-    echo " [i] restart myself"
-    exit 1
+#     . /init/wait_for/icinga_master.sh
+#
+#     sleep 4s
+#
+#     log_info "restart myself"
+#    exit 1
   fi
 
   # test the configuration
@@ -336,12 +381,12 @@ configure_icinga2_satellite() {
   #
   if [ $? -gt 0 ]
   then
-    echo " [E] the validation of our configuration was not successful."
-#    echo " [E] clean up and restart."
+    log_error "the validation of our configuration was not successful."
+#    log_error "clean up and restart."
 #     cp -v /etc/icinga2/zones.conf-distributed /etc/icinga2/zones.conf
 #     rm -rfv ${ICINGA_LIB_DIR}/backup/*
 #
-#     echo " [E] headshot ..."
+#     log_error "headshot ..."
 #
 # #    ps ax
 #
@@ -356,9 +401,9 @@ configure_icinga2_satellite() {
 #     exit 1
   fi
 
-  add_satellite_to_master
-
-  sleep 8s
+#  add_satellite_to_master
+#
+#  sleep 8s
 }
 
 configure_icinga2_satellite

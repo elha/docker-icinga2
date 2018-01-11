@@ -130,7 +130,7 @@ correct_rights() {
 
   if ( [ -z ${USER} ] || [ -z ${GROUP} ] )
   then
-    echo " [E] no nagios or icinga user/group found!"
+    log_error "no nagios or icinga user/group found!"
   else
     [ -e /var/lib/icinga2/api/log/current ] && rm -rf /var/lib/icinga2/api/log/current
 
@@ -139,4 +139,9 @@ correct_rights() {
     chown -R ${USER}:${GROUP} ${ICINGA2_RUN_DIR}/icinga2
     chown -R ${USER}:${GROUP} ${ICINGA_CERT_DIR}
   fi
+}
+
+
+random() {
+  echo $(shuf -i 5-30 -n 1)
 }

@@ -17,6 +17,8 @@ export ICINGA_CERT_DIR
 export ICINGA_LIB_DIR
 export HOSTNAME
 
+. /init/output.sh
+
 # -------------------------------------------------------------------------------------------------
 
 # side channel to inject some wild-style customized scripts
@@ -30,12 +32,12 @@ custom_scripts() {
     do
       case "$f" in
         *.sh)
-          echo " [W] ------------------------------------------------------"
-          echo " [W] YOU SHOULD KNOW WHAT YOU'RE DOING."
-          echo " [W] THIS CAN BREAK THE COMPLETE ICINGA2 CONFIGURATION!"
-          echo " [W] RUN SCRIPT: ${f}";
+          log_warn "------------------------------------------------------"
+          log_warn "YOU SHOULD KNOW WHAT YOU'RE DOING."
+          log_warn "THIS CAN BREAK THE COMPLETE ICINGA2 CONFIGURATION!"
+          log_warn "RUN SCRIPT: ${f}";
           nohup "${f}" > /dev/stdout 2>&1 &
-          echo " [W] ------------------------------------------------------"
+          log_warn "------------------------------------------------------"
           ;;
         *)
           echo " [w] ignoring file ${f}"
@@ -66,10 +68,10 @@ run() {
 
   detect_type
 
-  echo " ---------------------------------------------------"
-  echo "   Icinga ${ICINGA_TYPE} Version ${ICINGA_VERSION} - build: ${BUILD_DATE}"
-  echo " ---------------------------------------------------"
-  echo ""
+  log_info " ---------------------------------------------------"
+  log_info "   Icinga ${ICINGA_TYPE} Version ${ICINGA_VERSION} - build: ${BUILD_DATE}"
+  log_info " ---------------------------------------------------"
+  log_info ""
 
   . /init/common.sh
 
@@ -85,17 +87,26 @@ run() {
 
   custom_scripts
 
-  echo " [i] start init process ..."
+  log_info "start init process ..."
 
   if [[ "${ICINGA_TYPE}" = "Master" ]]
   then
-    export RAILS_ENV="production"
     # backup the generated zones
     #
     nohup /init/runtime/inotify.sh > /dev/stdout 2>&1 &
-    nohup /usr/local/bin/rest-service.rb > /dev/stdout 2>&1 &
+
+    # start the icinga-cert-service
+    if [ -f /usr/local/bin/rest-service.rb ]
+    then
+      nohup /usr/local/bin/rest-service.rb > /dev/stdout 2>&1 &
+    fi
   else
-    nohup /init/runtime/ca_validator.sh > /dev/stdout 2>&1 &
+
+    # start the CA ca_validator
+    #
+    # nohup /init/runtime/ca_validator.sh > /dev/stdout 2>&1 &
+
+    nohup /init/runtime/zone_watcher.sh > /dev/stdout 2>&1 &
   fi
 
   /usr/sbin/icinga2 \

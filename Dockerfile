@@ -36,7 +36,7 @@ RUN \
     bash bind-tools curl expect fping inotify-tools icinga2 jq mailx monitoring-plugins mariadb-client netcat-openbsd nmap nrpe-plugin openssl pwgen ruby rsync ssmtp tzdata unzip && \
   cp /etc/icinga2/conf.d.example/* /etc/icinga2/conf.d/ && \
   ln -s /usr/lib/nagios/plugins/* /usr/lib/monitoring-plugins/ && \
-  /usr/sbin/icinga2 feature enable command checker mainlog notification && \
+  /usr/sbin/icinga2 feature enable command checker mainlog notification debuglog && \
   mkdir -p /etc/icinga2/objects.d && \
   mkdir -p /run/icinga2/cmd && \
   cp /etc/icinga2/zones.conf /etc/icinga2/zones.conf-distributed && \

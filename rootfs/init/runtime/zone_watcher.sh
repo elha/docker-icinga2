@@ -10,8 +10,9 @@
 
 . /init/output.sh
 
-monitored_directory="/etc/icinga2"
-backup_directory="/var/lib/icinga2/backup"
+monitored_directory="/var/lib/icinga2/api"
+
+set -x
 
 inotifywait \
   --monitor \
@@ -19,12 +20,12 @@ inotifywait \
   --event create \
   --event attrib \
   --event close_write \
-  --event delete \
   ${monitored_directory} |
   while read path action file
   do
+    log_info "The file '$file' appeared in directory '$path' via '$action'"
 
-    if ( [[ -z "${file}" ]] || [[ ! ${file} =~ ^zones* ]] )
+    if ( [[ -z "${file}" ]] || [[ ! ${file} =~ ^$(hostname -f).conf ]] )
     then
       continue
     fi
@@ -37,14 +38,6 @@ inotifywait \
     then
       rm -rf ${backup_directory}/${file}
     else
-      # cp -r ${monitored_directory}/$(basename ${path}) ${backup_directory}/
-      rsync \
-        --archive \
-        --recursive \
-        --delete \
-        --include="zones.d/***" \
-        --include="zones.*" \
-        --exclude='*' \
-        ${monitored_directory}/* ${backup_directory}/
+      sed -i 's|^object Endpoint NodeName.*||' /etc/icinga2/zones.conf
     fi
   done
